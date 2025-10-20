@@ -1,0 +1,9 @@
+# Core dependencies for M.A.R.T.I.N.
+gradio>=4.0.0
+openai>=1.0.0
+langchain>=0.1.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+numpy>=1.24.0
+pandas>=2.0.0
