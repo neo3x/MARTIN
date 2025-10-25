@@ -6,17 +6,32 @@ import sys
 import os
 from pathlib import Path
 
-# Agregar directorio raíz al path
+# ✅ IMPORTAR GRADIO PRIMERO
+import gradio as gr
+from dotenv import load_dotenv
+
+# DEBUG: Verificar que gradio funciona AQUÍ
+print(f"DEBUG 1: Gradio tiene Blocks ANTES de importar MARTINAgent: {hasattr(gr, 'Blocks')}")
+print(f"DEBUG 1: Gradio location: {gr.__file__}")
+
+# ✅ Cargar .env temprano
+load_dotenv()
+
+# ✅ AHORA modificar path
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
-import gradio as gr
+# ✅ Importar lo que necesita el path modificado
 from agent_core.martin_agent import MARTINAgent
-from dotenv import load_dotenv
 
-# Cargar variables de entorno
-load_dotenv()
+# DEBUG: Verificar que gradio funciona DESPUÉS
+print(f"DEBUG 2: Gradio tiene Blocks DESPUÉS de importar MARTINAgent: {hasattr(gr, 'Blocks')}")
 
+# Si cambió, MARTINAgent está corrompiendo el import
+if not hasattr(gr, 'Blocks'):
+    print("🔴 ERROR: MARTINAgent corrompió el import de gradio!")
+    print(f"🔴 Gradio ahora es: {gr}")
+    print(f"🔴 Gradio.__file__: {gr.__file__ if hasattr(gr, '__file__') else 'NO TIENE __file__'}")
 class MARTINInterface:
     def __init__(self, llm_provider="auto"):
         """

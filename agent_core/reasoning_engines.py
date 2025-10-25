@@ -63,7 +63,7 @@ class ReasoningEngines:
         # Inicializar OpenAI
         if provider == "openai":
             try:
-                from langchain.chat_models import ChatOpenAI
+                from langchain_openai import ChatOpenAI
                 api_key = os.getenv("OPENAI_API_KEY")
                 
                 if not api_key:
@@ -88,7 +88,7 @@ class ReasoningEngines:
         # Inicializar Claude
         elif provider == "claude":
             try:
-                from langchain.chat_models import ChatAnthropic
+                from langchain_anthropic import ChatAnthropic
                 api_key = os.getenv("ANTHROPIC_API_KEY")
                 
                 if not api_key:
