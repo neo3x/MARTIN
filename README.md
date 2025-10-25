@@ -31,8 +31,8 @@ A diferencia de otros agentes que son siempre autónomos (riesgoso) o siempre pa
 
 ```bash
 # Clonar repositorio
-git clone https://github.com/tu-usuario/martin-agent
-cd martin-agent
+git https://github.com/neo3x/MARTIN
+cd MARTIN
 
 # Crear entorno virtual
 python -m venv venv
