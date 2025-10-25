@@ -1,5 +1,6 @@
 """
 Los 3 motores de razonamiento de M.A.R.T.I.N.
+Soporta OpenAI (GPT-4) y Anthropic (Claude)
 """
 from typing import Dict, Any
 import os
@@ -7,32 +8,93 @@ import os
 class ReasoningEngines:
     """
     Contiene los 3 modos de razonamiento de M.A.R.T.I.N.
+    Soporta múltiples LLMs: OpenAI y Claude
     """
     
-    def __init__(self, use_llm: bool = False):
+    def __init__(self, use_llm: bool = False, llm_provider: str = "auto"):
         """
         Args:
-            use_llm: Si True, usa LLM real. Si False, genera respuestas simuladas.
+            use_llm: Si True, usa LLM real. Si False, usa respuestas simuladas.
+            llm_provider: "openai", "claude", o "auto" (detecta automáticamente)
         """
         self.use_llm = use_llm
         self.llm = None
+        self.llm_provider = None
         
         if self.use_llm:
+            self.llm_provider = self._initialize_llm(llm_provider)
+            if not self.llm:
+                print("⚠️ No se pudo inicializar LLM. Usando modo simulado.")
+                self.use_llm = False
+    
+    def _initialize_llm(self, provider: str):
+        """Inicializa el LLM según el proveedor especificado"""
+        
+        # Auto-detectar qué API key está disponible
+        if provider == "auto":
+            if os.getenv("ANTHROPIC_API_KEY"):
+                provider = "claude"
+                print("🔍 Auto-detectado: Claude API key disponible")
+            elif os.getenv("OPENAI_API_KEY"):
+                provider = "openai"
+                print("🔍 Auto-detectado: OpenAI API key disponible")
+            else:
+                print("⚠️ No se encontró OPENAI_API_KEY ni ANTHROPIC_API_KEY")
+                return None
+        
+        # Inicializar OpenAI
+        if provider == "openai":
             try:
                 from langchain.chat_models import ChatOpenAI
                 api_key = os.getenv("OPENAI_API_KEY")
-                if api_key:
-                    self.llm = ChatOpenAI(
-                        model="gpt-4",
-                        temperature=0,
-                        api_key=api_key
-                    )
-                else:
-                    print("⚠️ OPENAI_API_KEY no configurada. Usando modo simulado.")
-                    self.use_llm = False
+                
+                if not api_key:
+                    print("⚠️ OPENAI_API_KEY no configurada")
+                    return None
+                
+                self.llm = ChatOpenAI(
+                    model="gpt-4",
+                    temperature=0,
+                    api_key=api_key
+                )
+                print("✅ LLM inicializado: OpenAI GPT-4")
+                return "openai"
+                
             except ImportError:
-                print("⚠️ langchain no instalado. Usando modo simulado.")
-                self.use_llm = False
+                print("⚠️ langchain no instalado")
+                return None
+            except Exception as e:
+                print(f"⚠️ Error inicializando OpenAI: {e}")
+                return None
+        
+        # Inicializar Claude
+        elif provider == "claude":
+            try:
+                from langchain.chat_models import ChatAnthropic
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+                
+                if not api_key:
+                    print("⚠️ ANTHROPIC_API_KEY no configurada")
+                    return None
+                
+                self.llm = ChatAnthropic(
+                    model="claude-3-5-sonnet-20241022",
+                    temperature=0,
+                    anthropic_api_key=api_key
+                )
+                print("✅ LLM inicializado: Anthropic Claude 3.5 Sonnet")
+                return "claude"
+                
+            except ImportError:
+                print("⚠️ anthropic no instalado. Instala con: pip install anthropic")
+                return None
+            except Exception as e:
+                print(f"⚠️ Error inicializando Claude: {e}")
+                return None
+        
+        else:
+            print(f"⚠️ Proveedor desconocido: {provider}")
+            return None
     
     def passive_reasoning(self, task: str, context: Dict = None) -> Dict[str, Any]:
         """
@@ -46,48 +108,40 @@ class ReasoningEngines:
         """
         
         if self.use_llm and self.llm:
-            # Usar LLM real
             prompt = f"""
 Eres M.A.R.T.I.N., un agente de IA en MODO PASIVO.
 
-En este modo eres consultivo y colaborativo. Tu objetivo es:
-1. Entender profundamente lo que el usuario necesita
-2. Proponer un plan de acción detallado
-3. Explicar las opciones disponibles
-4. ESPERAR confirmación antes de proceder
+Tu trabajo es:
+1. Analizar la tarea del usuario
+2. Proponer un plan estructurado
+3. Explicar qué harás
+4. NO ejecutar nada hasta recibir confirmación
 
-Tarea del usuario: {task}
+Tarea: {task}
 Contexto: {context if context else "No hay contexto adicional"}
 
-Genera una respuesta estructurada con:
+Responde en este formato:
 
 ## 📋 MI ANÁLISIS
-[Explica cómo entiendes la tarea y qué objetivos detectas]
+[Cómo entiendes la tarea]
 
 ## 🎯 PLAN PROPUESTO
-[Plan paso a paso con timing estimado]
+1. [Paso 1] (tiempo estimado)
+2. [Paso 2] (tiempo estimado)
 
-Paso 1: [Descripción] (Tiempo: X minutos)
-Paso 2: [Descripción] (Tiempo: Y minutos)
-...
+## ⚠️ CONSIDERACIONES
+- [Punto importante 1]
+- [Punto importante 2]
 
-## ⚠️ CONSIDERACIONES IMPORTANTES
-- [Punto clave 1]
-- [Punto clave 2]
-
-## 🤔 PREGUNTAS PARA TI
-1. [Pregunta para clarificar]
-
-¿Te parece bien este plan? ¿Quieres que ajuste algo antes de empezar?
+¿Procedo con este plan?
 """
             try:
                 response = self.llm.predict(prompt)
             except Exception as e:
-                response = f"Error al llamar LLM: {e}\nUsando respuesta simulada."
-                response += self._generate_simulated_passive_response(task)
+                response = f"Error al llamar LLM: {e}\n"
+                response += self._generate_passive_mock(task)
         else:
-            # Usar respuesta simulada
-            response = self._generate_simulated_passive_response(task)
+            response = self._generate_passive_mock(task)
         
         return {
             "mode": "PASSIVE",
@@ -111,31 +165,24 @@ Paso 2: [Descripción] (Tiempo: Y minutos)
         
         if self.use_llm and self.llm:
             prompt = f"""
-Eres M.A.R.T.I.N. en MODO DIRECTO - un agente autónomo y eficiente.
+Eres M.A.R.T.I.N. en MODO DIRECTO - agente autónomo.
 
-En este modo actúas con confianza y autonomía. Tu objetivo es:
-1. Analizar rápidamente qué se necesita hacer
-2. Ejecutar directamente sin preguntar
-3. Reportar resultados con claridad
-4. Explicar tu razonamiento DESPUÉS de ejecutar
+Tu trabajo es:
+1. Analizar y ejecutar inmediatamente
+2. Reportar resultados
+3. Explicar tu razonamiento
 
 Tarea: {task}
 
-Genera una respuesta que muestre:
+Responde en este formato:
 
 ## ⚡ EJECUTADO
-[Describe qué acciones tomaste]
+[Qué acciones tomaste]
 
 ## 📊 RESULTADOS
-[Presenta los resultados obtenidos de forma clara]
+[Resultados obtenidos]
 
 ## 🧠 MI RAZONAMIENTO
-[Explica por qué tomaste estas decisiones específicas]
-
-Pasos que seguí:
-1. [Decisión/acción]
-2. [Decisión/acción]
-
 Por qué lo hice así:
 - [Razón 1]
 - [Razón 2]
@@ -143,18 +190,17 @@ Por qué lo hice así:
             try:
                 response = self.llm.predict(prompt)
             except Exception as e:
-                response = f"Error al llamar LLM: {e}\nUsando respuesta simulada."
-                response += self._generate_simulated_direct_response(task)
+                response = f"Error al llamar LLM: {e}\n"
+                response += self._generate_direct_mock(task)
         else:
-            response = self._generate_simulated_direct_response(task)
+            response = self._generate_direct_mock(task)
         
         return {
             "mode": "DIRECT",
             "status": "executed",
             "results": response,
             "message": f"⚡ MODO DIRECTO - Ejecutado automáticamente\n\n{response}",
-            "requires_user_action": False,
-            "reasoning_visible": True
+            "requires_user_action": False
         }
     
     def safe_reasoning(self, task: str, context: Dict = None) -> Dict[str, Any]:
@@ -177,30 +223,29 @@ Por qué lo hice así:
             except:
                 plan = f"Plan para: {task}"
             
-            # Paso 2: AUTO-VALIDACIÓN (CRÍTICO)
+            # Paso 2: AUTO-VALIDACIÓN
             validation_prompt = f"""
 Eres un validador de seguridad crítico.
 
-Tarea original: {task}
-Plan propuesto: {plan}
+Tarea: {task}
+Plan: {plan}
 
 Analiza riesgos:
 1. ¿Es destructivo?
 2. ¿Puede causar pérdida de datos?
-3. ¿Afecta sistemas críticos?
-4. ¿Es reversible?
+3. ¿Es reversible?
 
 Responde:
 
 NIVEL DE RIESGO: [BAJO/MEDIO/ALTO/CRÍTICO]
 
-RIESGOS IDENTIFICADOS:
+RIESGOS:
 - [Riesgo 1]
 
 DECISIÓN: [APROBAR/RECHAZAR]
 
 SI RECHAZAS:
-ALTERNATIVA SEGURA: [descripción]
+ALTERNATIVA: [alternativa segura]
 
 SI APRUEBAS:
 PRECAUCIONES: [lista]
@@ -208,12 +253,12 @@ PRECAUCIONES: [lista]
             try:
                 validation = self.llm.predict(validation_prompt)
             except:
-                validation = self._generate_simulated_safe_validation(task)
+                validation = self._generate_safe_validation_mock(task)
         else:
             plan = f"Plan para: {task}"
-            validation = self._generate_simulated_safe_validation(task)
+            validation = self._generate_safe_validation_mock(task)
         
-        # Analizar resultado de validación
+        # Analizar resultado
         if "RECHAZAR" in validation or "CRÍTICO" in validation or "ALTO" in validation:
             return {
                 "mode": "SAFE",
@@ -231,47 +276,37 @@ PRECAUCIONES: [lista]
                 "validation_passed": True,
                 "plan": plan,
                 "validation_report": validation,
-                "results": "[Simulación de ejecución segura]",
                 "message": f"🛡️ MODO SEGURO - Validado y ejecutado\n\n{validation}\n\n✅ EJECUTADO con precauciones.",
                 "requires_user_action": False
             }
     
     # Métodos de respuestas simuladas
     
-    def _generate_simulated_passive_response(self, task: str) -> str:
+    def _generate_passive_mock(self, task: str) -> str:
         return f"""
 ## 📋 MI ANÁLISIS
 He analizado tu solicitud: "{task}"
 
-Parece que necesitas ayuda con una tarea que requiere varios pasos y decisiones.
-
 ## 🎯 PLAN PROPUESTO
+1. Analizar requisitos específicos (5 min)
+2. Preparar documentación necesaria (15 min)
+3. Ejecutar acciones principales (20 min)
+4. Verificar resultados (10 min)
 
-Paso 1: Analizar los requisitos específicos (5 minutos)
-Paso 2: Preparar la documentación necesaria (15 minutos)
-Paso 3: Ejecutar las acciones principales (20 minutos)
-Paso 4: Verificar y validar resultados (10 minutos)
+## ⚠️ CONSIDERACIONES
+- Requiere acceso a ciertos recursos
+- Es importante revisar permisos necesarios
 
-## ⚠️ CONSIDERACIONES IMPORTANTES
-- Esta tarea requiere acceso a ciertos recursos
-- Es importante revisar los permisos necesarios
-- Debemos asegurar que no haya conflictos
-
-## 🤔 PREGUNTAS PARA TI
-1. ¿Hay alguna restricción de tiempo?
-2. ¿Tienes acceso a todos los recursos necesarios?
-
-¿Te parece bien este plan? ¿Quieres que ajuste algo antes de empezar?
+¿Procedo con este plan?
 """
     
-    def _generate_simulated_direct_response(self, task: str) -> str:
+    def _generate_direct_mock(self, task: str) -> str:
         return f"""
 ## ⚡ EJECUTADO
 He completado la tarea: "{task}"
 
 Acciones realizadas:
 - Analicé los requisitos
-- Preparé los recursos necesarios
 - Ejecuté el proceso principal
 - Validé los resultados
 
@@ -281,59 +316,71 @@ Acciones realizadas:
 🔍 Validación: OK
 
 ## 🧠 MI RAZONAMIENTO
-
-Pasos que seguí:
-1. Identificación rápida de la tarea clara y directa
-2. Ejecución inmediata sin necesidad de clarificación
-3. Validación automática de resultados
-
 Por qué lo hice así:
 - La tarea era clara y específica
-- No había riesgos de seguridad significativos
-- La ejecución directa es más eficiente en este caso
+- No había riesgos de seguridad
+- Ejecución directa más eficiente
 """
     
-    def _generate_simulated_safe_validation(self, task: str) -> str:
-        # Detectar si es peligroso
+    def _generate_safe_validation_mock(self, task: str) -> str:
         danger_words = ['delete', 'remove', 'destroy', 'disable', 'drop', 'eliminar', 'borrar']
         is_dangerous = any(word in task.lower() for word in danger_words)
         
         if is_dangerous:
-            return f"""
+            return """
 NIVEL DE RIESGO: ALTO
 
 RIESGOS IDENTIFICADOS:
-- Acción potencialmente destructiva detectada
-- Puede causar pérdida de datos o acceso
-- Afecta recursos críticos del sistema
-- Difícil o imposible de revertir
+- Acción potencialmente destructiva
+- Puede causar pérdida de datos
+- Afecta recursos críticos
+- Difícil de revertir
 
 DECISIÓN: RECHAZAR
 
 ALTERNATIVA SEGURA:
-En lugar de ejecutar esta acción directamente, sugiero:
-1. Crear un backup completo primero
+1. Crear backup completo primero
 2. Ejecutar en ambiente de prueba
-3. Implementar un procedimiento de rollback
-4. Obtener aprobación explícita de supervisores
-
-Esta alternativa protege contra errores costosos y mantiene la integridad del sistema.
+3. Implementar procedimiento de rollback
+4. Obtener aprobación explícita
 """
         else:
-            return f"""
+            return """
 NIVEL DE RIESGO: BAJO
 
 RIESGOS IDENTIFICADOS:
 - Riesgo mínimo detectado
-- Operación parece ser de solo lectura o baja criticidad
+- Operación de solo lectura
 - No afecta datos críticos
 
 DECISIÓN: APROBAR
 
-PRECAUCIONES NECESARIAS:
-- Logging habilitado para auditoría
-- Monitoreo de la operación
-- Validación de resultados post-ejecución
-
-Procedo con la ejecución de forma segura.
+PRECAUCIONES:
+- Logging habilitado
+- Monitoreo activo
+- Validación post-ejecución
 """
+
+
+# Test
+if __name__ == "__main__":
+    print("🧪 TESTING REASONING ENGINES\n")
+    
+    engines = ReasoningEngines(use_llm=False)
+    
+    print("━━━ TEST PASSIVE ━━━")
+    result1 = engines.passive_reasoning("Ayúdame con SOC 2")
+    print(result1['message'])
+    print()
+    
+    print("━━━ TEST DIRECT ━━━")
+    result2 = engines.direct_reasoning("Genera política de passwords")
+    print(result2['message'])
+    print()
+    
+    print("━━━ TEST SAFE ━━━")
+    result3 = engines.safe_reasoning("Delete all users")
+    print(result3['message'])
+    print()
+    
+    print("✅ Tests completados!")

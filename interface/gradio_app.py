@@ -1,5 +1,6 @@
 """
 Interfaz de usuario con Gradio para M.A.R.T.I.N.
+Con soporte para múltiples LLMs (OpenAI y Claude)
 """
 import sys
 import os
@@ -17,16 +18,57 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class MARTINInterface:
-    def __init__(self):
-        # Detectar si hay API key
-        use_llm = os.getenv('OPENAI_API_KEY') is not None
-        self.agent = MARTINAgent(use_llm=use_llm, verbose=False)
+    def __init__(self, llm_provider="auto"):
+        """
+        Args:
+            llm_provider: "openai", "claude", o "auto"
+        """
+        # Detectar API keys disponibles
+        self.has_openai = os.getenv('OPENAI_API_KEY') is not None
+        self.has_claude = os.getenv('ANTHROPIC_API_KEY') is not None
+        
+        use_llm = self.has_openai or self.has_claude
+        
+        self.agent = MARTINAgent(
+            use_llm=use_llm,
+            llm_provider=llm_provider,
+            verbose=False
+        )
         self.conversation = []
         
+        # Mostrar estado inicial
         if use_llm:
-            print("✅ OpenAI API Key detectada - Usando GPT-4")
+            if self.agent.llm_provider == "openai":
+                print("✅ Usando OpenAI GPT-4")
+            elif self.agent.llm_provider == "claude":
+                print("✅ Usando Anthropic Claude 3.5 Sonnet")
         else:
-            print("⚠️  Sin API Key - Usando modo simulado")
+            print("⚠️  Sin API Keys - Usando modo simulado")
+            print("   Para usar LLMs reales, configura API keys en .env")
+    
+    def switch_llm(self, provider):
+        """Cambia el proveedor de LLM"""
+        
+        # Verificar que tenga la API key necesaria
+        if provider == "openai" and not self.has_openai:
+            return "❌ OPENAI_API_KEY no configurada en .env"
+        
+        if provider == "claude" and not self.has_claude:
+            return "❌ ANTHROPIC_API_KEY no configurada en .env"
+        
+        # Reiniciar agente con nuevo proveedor
+        self.agent = MARTINAgent(
+            use_llm=True,
+            llm_provider=provider,
+            verbose=False
+        )
+        
+        provider_names = {
+            "openai": "OpenAI GPT-4",
+            "claude": "Anthropic Claude 3.5 Sonnet"
+        }
+        
+        return f"✅ Cambiado a {provider_names.get(provider, provider)}"
     
     def process_message(self, message, environment, history):
         """Procesa mensaje del usuario"""
@@ -76,7 +118,7 @@ class MARTINInterface:
     def reset_conversation(self):
         """Reinicia la conversación"""
         self.agent.reset()
-        return [], "Conversación reiniciada"
+        return [], "✅ Conversación reiniciada"
     
     def export_conversation(self):
         """Exporta la conversación"""
@@ -86,26 +128,27 @@ class MARTINInterface:
     def get_stats(self):
         """Obtiene estadísticas"""
         stats = self.agent.get_stats()
+        llm_info = {
+            "openai": "OpenAI GPT-4",
+            "claude": "Anthropic Claude 3.5 Sonnet",
+            "simulado": "Modo simulado (sin API key)"
+        }.get(stats['llm_provider'], stats['llm_provider'])
+        
         return f"""
 📊 ESTADÍSTICAS DE LA SESIÓN
 
 Total de interacciones: {stats['total_interactions']}
 Modos usados: {stats['modes_used']}
 Session ID: {stats['session_id']}
-LLM: {stats['llm_mode']}
+LLM: {llm_info}
 """
     
     def create_interface(self):
-        """Crea la interfaz Gradio"""
+        """Crea la interfaz Gradio con selector de LLM"""
         
         with gr.Blocks(
             title="M.A.R.T.I.N. Agent",
-            theme=gr.themes.Soft(),
-            css="""
-                .mode-passive { border-left: 4px solid #4A90E2; }
-                .mode-direct { border-left: 4px solid #7ED321; }
-                .mode-safe { border-left: 4px solid #F5A623; }
-            """
+            theme=gr.themes.Soft()
         ) as interface:
             
             gr.Markdown("""
@@ -114,6 +157,42 @@ LLM: {stats['llm_mode']}
             
             Agente de IA con **razonamiento tri-modal adaptativo** para compliance automation
             """)
+            
+            # Selector de LLM (solo si hay al menos una API key)
+            if self.has_openai or self.has_claude:
+                with gr.Row():
+                    gr.Markdown("### 🤖 Seleccionar LLM:")
+                    
+                    llm_choices = []
+                    if self.has_openai:
+                        llm_choices.append(("GPT-4 (OpenAI)", "openai"))
+                    if self.has_claude:
+                        llm_choices.append(("Claude 3.5 (Anthropic)", "claude"))
+                    
+                    llm_selector = gr.Radio(
+                        choices=llm_choices,
+                        value=llm_choices[0][1] if llm_choices else None,
+                        label="Proveedor de LLM",
+                        info="Puedes cambiar entre modelos durante la conversación"
+                    )
+                    
+                    current_llm = "GPT-4" if self.agent.llm_provider == "openai" else "Claude 3.5" if self.agent.llm_provider == "claude" else "Simulado"
+                    
+                    llm_status = gr.Textbox(
+                        label="Estado actual",
+                        value=f"✅ Usando {current_llm}",
+                        interactive=False,
+                        lines=1
+                    )
+            else:
+                gr.Markdown("""
+                ⚠️ **Sin API Keys configuradas** - Ejecutando en modo simulado
+                
+                Para usar LLMs reales:
+                1. Copia `.env.example` a `.env`
+                2. Agrega tu `OPENAI_API_KEY` o `ANTHROPIC_API_KEY`
+                3. Reinicia la aplicación
+                """)
             
             with gr.Row():
                 with gr.Column(scale=2):
@@ -226,6 +305,14 @@ LLM: {stats['llm_mode']}
                 lambda: self.get_stats(),
                 outputs=[output_info]
             )
+            
+            # Event handler para cambio de LLM
+            if self.has_openai or self.has_claude:
+                llm_selector.change(
+                    self.switch_llm,
+                    inputs=[llm_selector],
+                    outputs=[llm_status]
+                )
         
         return interface
 
@@ -236,13 +323,27 @@ def main():
     print("🧠 M.A.R.T.I.N. - Interfaz Gradio")
     print("="*60)
     
-    ui = MARTINInterface()
+    # Detectar LLM provider desde .env o auto
+    llm_provider = os.getenv('LLM_PROVIDER', 'auto')
+    
+    ui = MARTINInterface(llm_provider=llm_provider)
     interface = ui.create_interface()
     
     print("\n🚀 Lanzando interfaz web...")
     print("📍 Una vez iniciada, abre el navegador en la URL que aparece")
-    print("\n💡 TIP: Prueba diferentes ambientes (dev/staging/production)")
-    print("         para ver cómo cambia el comportamiento de M.A.R.T.I.N.\n")
+    
+    if ui.has_openai or ui.has_claude:
+        print("\n✅ API Keys detectadas:")
+        if ui.has_openai:
+            print("   • OpenAI GPT-4")
+        if ui.has_claude:
+            print("   • Anthropic Claude 3.5 Sonnet")
+        print("\n💡 Puedes cambiar entre modelos desde la interfaz")
+    else:
+        print("\n⚠️  Ejecutando en modo simulado")
+        print("   Para usar LLMs reales, configura tu API key en .env")
+    
+    print()
     
     interface.launch(
         share=False,

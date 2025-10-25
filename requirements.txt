@@ -1,18 +1,27 @@
+# Core dependencies for M.A.R.T.I.N.
+# Install with: pip install -r requirements.txt
+
+# Web Interface
 gradio>=4.0.0
+
+# LLM Integration - OpenAI
 openai>=1.0.0
+
+# LLM Integration - Anthropic (Claude)
+anthropic>=0.8.0
+
+# LangChain (works with both)
 langchain>=0.1.0
-pyyaml>=6.0
-python-dotenv>=1.0.0
-requests>=2.31.0
-numpy>=1.24.0
-pandas>=2.0.0
-gradio>=4.0.0
-openai>=1.0.0
-langchain>=0.1.0
+
+# Configuration
 python-dotenv>=1.0.0
 pyyaml>=6.0
+
+# Utilities
 requests>=2.31.0
- numpy>=1.24.0
- pandas>=2.0.0
- PyGithub>=2.1.0
- boto3>=1.28.0
+
+# Optional (uncomment if needed):
+# numpy>=1.24.0
+# pandas>=2.0.0
+# PyGithub>=2.1.0
+# boto3>=1.28.0
