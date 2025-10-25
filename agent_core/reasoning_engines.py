@@ -1,14 +1,26 @@
 """
 Los 3 motores de razonamiento de M.A.R.T.I.N.
 Soporta OpenAI (GPT-4) y Anthropic (Claude)
+CON INTEGRACIÓN DE TOOLS
 """
 from typing import Dict, Any
 import os
+import sys
+from pathlib import Path
+
+# Importar tools
+sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from tools.policy_generator import PolicyGenerator
+except ImportError:
+    PolicyGenerator = None
+    print("⚠️ PolicyGenerator no disponible - instala dependencias")
 
 class ReasoningEngines:
     """
     Contiene los 3 modos de razonamiento de M.A.R.T.I.N.
     Soporta múltiples LLMs: OpenAI y Claude
+    AHORA CON HERRAMIENTAS REALES
     """
     
     def __init__(self, use_llm: bool = False, llm_provider: str = "auto"):
@@ -26,6 +38,12 @@ class ReasoningEngines:
             if not self.llm:
                 print("⚠️ No se pudo inicializar LLM. Usando modo simulado.")
                 self.use_llm = False
+        
+        # Inicializar herramientas
+        if PolicyGenerator:
+            self.policy_generator = PolicyGenerator(llm=self.llm if self.use_llm else None)
+        else:
+            self.policy_generator = None
     
     def _initialize_llm(self, provider: str):
         """Inicializa el LLM según el proveedor especificado"""
@@ -155,16 +173,104 @@ Responde en este formato:
         """
         MODO DIRECTO: Genera plan Y ejecuta automáticamente
         
-        Comportamiento:
-        1. Analiza la tarea
-        2. Genera plan de acción
-        3. EJECUTA sin preguntar
-        4. Reporta resultados
-        5. Explica su razonamiento
+        AHORA CON DETECCIÓN Y EJECUCIÓN DE HERRAMIENTAS
         """
         
-        if self.use_llm and self.llm:
-            prompt = f"""
+        task_lower = task.lower()
+        
+        # DETECTAR SI DEBE USAR POLICY GENERATOR
+        policy_keywords = ['genera', 'crea', 'escribe', 'crear', 'generar', 'policy', 'política', 'politica']
+        policy_types = {
+            'password': 'password_policy',
+            'contraseña': 'password_policy',
+            'contraseñas': 'password_policy',
+            'incidente': 'incident_response',
+            'incidentes': 'incident_response',
+            'incident': 'incident_response',
+            'acceso': 'access_control',
+            'access': 'access_control',
+            'dato': 'data_classification',
+            'datos': 'data_classification',
+            'data': 'data_classification',
+            'backup': 'backup_recovery',
+            'recuperación': 'backup_recovery',
+            'recuperacion': 'backup_recovery'
+        }
+        
+        should_generate_policy = any(keyword in task_lower for keyword in policy_keywords)
+        detected_policy_type = None
+        
+        if should_generate_policy:
+            for keyword, policy_type in policy_types.items():
+                if keyword in task_lower:
+                    detected_policy_type = policy_type
+                    break
+        
+        # SI DEBE GENERAR POLÍTICA Y TENEMOS LA TOOL
+        if should_generate_policy and detected_policy_type and self.policy_generator:
+            
+            # Contexto de la empresa
+            company_context = {
+                'name': context.get('company_name', 'La Organización') if context else 'La Organización',
+                'size': context.get('company_size', '20-50') if context else '20-50',
+                'industry': context.get('industry', 'Tecnología / SaaS') if context else 'Tecnología / SaaS',
+                'tech_stack': context.get('tech_stack', 'Cloud-based') if context else 'Cloud-based',
+                'compliance_targets': context.get('compliance_targets', ['SOC 2', 'ISO 27001']) if context else ['SOC 2', 'ISO 27001']
+            }
+            
+            # EJECUTAR LA HERRAMIENTA
+            policy_content = self.policy_generator.generate_policy(
+                detected_policy_type,
+                company_context
+            )
+            
+            policy_info = self.policy_generator.POLICY_TEMPLATES[detected_policy_type]
+            
+            response = f"""
+## ⚡ EJECUTADO CON POLICY GENERATOR
+
+He generado la política solicitada automáticamente.
+
+## 📊 RESULTADO
+
+**Política Generada:** {policy_info['name']}
+**Frameworks de Referencia:** {', '.join(policy_info['frameworks'])}
+**Controles Aplicables:** {', '.join(policy_info['controls'])}
+**Longitud:** ~{len(policy_content.split())} palabras
+
+## 📄 CONTENIDO DE LA POLÍTICA
+
+{policy_content}
+
+## 🧠 MI RAZONAMIENTO
+
+**Por qué ejecuté en MODO DIRECTO:**
+1. ✅ Tarea clara: generar una política específica ({detected_policy_type})
+2. ✅ Bajo riesgo: solo generación de documentación
+3. ✅ No requiere datos sensibles
+4. ✅ Resultado predecible y seguro
+
+**Herramienta utilizada:** Policy Generator
+**Proceso:** Detecté keywords → Identifiqué tipo de política → Ejecuté generación → Entregué resultado completo
+
+💡 **Nota:** Esta política requiere revisión legal antes de implementación formal.
+"""
+            
+            return {
+                "mode": "DIRECT",
+                "status": "executed",
+                "tool_used": "policy_generator",
+                "policy_type": detected_policy_type,
+                "policy_content": policy_content,
+                "results": response,
+                "message": f"⚡ MODO DIRECTO - Ejecutado con Policy Generator\n\n{response}",
+                "requires_user_action": False
+            }
+        
+        # SI NO ES GENERACIÓN DE POLÍTICA, FLUJO NORMAL CON LLM
+        else:
+            if self.use_llm and self.llm:
+                prompt = f"""
 Eres M.A.R.T.I.N. en MODO DIRECTO - agente autónomo.
 
 Tu trabajo es:
@@ -187,21 +293,21 @@ Por qué lo hice así:
 - [Razón 1]
 - [Razón 2]
 """
-            try:
-                response = self.llm.predict(prompt)
-            except Exception as e:
-                response = f"Error al llamar LLM: {e}\n"
-                response += self._generate_direct_mock(task)
-        else:
-            response = self._generate_direct_mock(task)
-        
-        return {
-            "mode": "DIRECT",
-            "status": "executed",
-            "results": response,
-            "message": f"⚡ MODO DIRECTO - Ejecutado automáticamente\n\n{response}",
-            "requires_user_action": False
-        }
+                try:
+                    response = self.llm.predict(prompt)
+                except Exception as e:
+                    response = f"Error al llamar LLM: {e}\n"
+                    response += self._generate_direct_mock(task)
+            else:
+                response = self._generate_direct_mock(task)
+            
+            return {
+                "mode": "DIRECT",
+                "status": "executed",
+                "results": response,
+                "message": f"⚡ MODO DIRECTO - Ejecutado automáticamente\n\n{response}",
+                "requires_user_action": False
+            }
     
     def safe_reasoning(self, task: str, context: Dict = None) -> Dict[str, Any]:
         """
@@ -364,23 +470,30 @@ PRECAUCIONES:
 
 # Test
 if __name__ == "__main__":
-    print("🧪 TESTING REASONING ENGINES\n")
+    print("🧪 TESTING REASONING ENGINES CON TOOLS\n")
     
     engines = ReasoningEngines(use_llm=False)
     
-    print("━━━ TEST PASSIVE ━━━")
+    print("━━━ TEST 1: PASSIVE ━━━")
     result1 = engines.passive_reasoning("Ayúdame con SOC 2")
-    print(result1['message'])
+    print(result1['message'][:200] + "...")
     print()
     
-    print("━━━ TEST DIRECT ━━━")
-    result2 = engines.direct_reasoning("Genera política de passwords")
-    print(result2['message'])
+    print("━━━ TEST 2: DIRECT (sin tool) ━━━")
+    result2 = engines.direct_reasoning("Explícame qué es compliance")
+    print(result2['message'][:200] + "...")
     print()
     
-    print("━━━ TEST SAFE ━━━")
-    result3 = engines.safe_reasoning("Delete all users")
-    print(result3['message'])
+    print("━━━ TEST 3: DIRECT (CON POLICY GENERATOR) ━━━")
+    result3 = engines.direct_reasoning("Genera política de contraseñas")
+    print(f"Tool usado: {result3.get('tool_used', 'ninguno')}")
+    print(f"Tipo de política: {result3.get('policy_type', 'N/A')}")
+    print(f"Longitud de política: {len(result3.get('policy_content', ''))} caracteres")
+    print()
+    
+    print("━━━ TEST 4: SAFE ━━━")
+    result4 = engines.safe_reasoning("Delete all users")
+    print(result4['message'][:200] + "...")
     print()
     
     print("✅ Tests completados!")
