@@ -1,6 +1,5 @@
 """
 ModeSelector - El cerebro que decide cómo M.A.R.T.I.N. debe razonar
-VERSIÓN CORREGIDA - Mejor detección de ambigüedad
 """
 from typing import Dict, Literal
 import re
@@ -21,26 +20,13 @@ class ModeSelector:
     DANGER_KEYWORDS = [
         'delete', 'remove', 'destroy', 'drop', 'disable', 
         'terminate', 'kill', 'shutdown', 'revoke', 'block',
-        'eliminar', 'borrar', 'destruir', 'deshabilitar',
-        'desactivar', 'quitar', 'erradicar'
+        'eliminar', 'borrar', 'destruir', 'deshabilitar'
     ]
     
     # Palabras que indican ambigüedad o necesidad de clarificación
     VAGUE_KEYWORDS = [
-        'ayuda', 'ayúdame', 'ayudame', 'help', 'cómo', 'como', 
-        'qué debo', 'que debo', 'no sé', 'no se', 'podrías', 
-        'puedes', 'quiero', 'necesito', 'quisiera', 'me gustaría',
-        'explica', 'explicame', 'cuéntame', 'cuentame', 'orientación',
-        'guía', 'guia', 'asesoría', 'asesoria', 'consejo'
-    ]
-    
-    # Palabras que indican acción específica y clara
-    SPECIFIC_ACTION_KEYWORDS = [
-        'genera', 'generar', 'crea', 'crear', 'escribe', 'escribir',
-        'actualiza', 'actualizar', 'modifica', 'modificar',
-        'configura', 'configurar', 'instala', 'instalar',
-        'genera política', 'crea documento', 'escribe reporte',
-        'generate', 'create', 'write', 'update', 'modify'
+        'ayuda', 'ayúdame', 'help', 'cómo', 'qué debo', 'no sé',
+        'podrías', 'puedes', 'quiero', 'necesito'
     ]
     
     def __init__(self):
@@ -80,13 +66,13 @@ class ModeSelector:
             mode = "SAFE"
             reason = "Entorno de producción detectado"
         
-        # 2. Riesgo moderado-alto va a SAFE (UMBRAL REDUCIDO A 0.5)
-        elif risk_score >= 0.5:
+        # 2. Alto riesgo siempre va a SAFE
+        elif risk_score >= 0.7:
             mode = "SAFE"
-            reason = f"Riesgo moderado-alto detectado (score: {risk_score:.2f})"
+            reason = f"Riesgo alto detectado (score: {risk_score:.2f})"
         
-        # 3. Baja claridad va a PASSIVE (UMBRAL AJUSTADO A 0.6)
-        elif clarity_score < 0.6:
+        # 3. Baja claridad va a PASSIVE
+        elif clarity_score < 0.5:
             mode = "PASSIVE"
             reason = f"Tarea ambigua o requiere clarificación (clarity: {clarity_score:.2f})"
         
@@ -114,22 +100,19 @@ class ModeSelector:
         risk = 0.0
         task_lower = task.lower()
         
-        # Factor 1: Palabras peligrosas (PESO AUMENTADO)
+        # Factor 1: Palabras peligrosas
         danger_words_found = sum(1 for word in self.DANGER_KEYWORDS if word in task_lower)
         if danger_words_found > 0:
-            risk += 0.5 * min(danger_words_found / 2, 1.0)  # AUMENTADO de 0.4 a 0.5
+            risk += 0.4 * min(danger_words_found / 2, 1.0)
         
         # Factor 2: Recursos críticos
         critical_resources = ['database', 'db', 'producción', 'production', 
-                            'payment', 'billing', 'auth', 'users', 'admin',
-                            'password', 'contraseña', 'credential', 'secret',
-                            'mfa', '2fa', 'autenticación', 'authentication']
-        critical_count = sum(1 for resource in critical_resources if resource in task_lower)
-        if critical_count > 0:
-            risk += 0.25 * min(critical_count, 2)  # Hasta 0.5 si hay múltiples
+                            'payment', 'billing', 'auth', 'users', 'admin']
+        if any(resource in task_lower for resource in critical_resources):
+            risk += 0.3
         
         # Factor 3: Scope amplio
-        broad_scope_indicators = ['all', 'every', 'todos', 'toda', 'cada', 'entire', 'completo', 'todo']
+        broad_scope_indicators = ['all', 'every', 'todos', 'cada', 'entire', 'completo']
         if any(indicator in task_lower for indicator in broad_scope_indicators):
             risk += 0.2
         
@@ -146,56 +129,30 @@ class ModeSelector:
         Factores:
         - Presencia de preguntas
         - Longitud de la instrucción
-        - Palabras vagas vs específicas
+        - Palabras vagas
         - Especificidad
-        
-        AJUSTES:
-        - Mayor penalización por palabras vagas
-        - Menor penalización por longitud corta si es específica
-        - Detección de acciones específicas
         """
         clarity = 1.0
         task_lower = task.lower()
         
         # Factor 1: Es una pregunta
         if '?' in task:
-            clarity -= 0.4  # AUMENTADO de 0.3 a 0.4
+            clarity -= 0.3
         
-        # Factor 2: Palabras vagas (PENALIZACIÓN AUMENTADA)
+        # Factor 2: Palabras vagas
         vague_words_found = sum(1 for word in self.VAGUE_KEYWORDS if word in task_lower)
-        if vague_words_found > 0:
-            clarity -= 0.25 * vague_words_found  # AUMENTADO de 0.15 a 0.25
+        clarity -= 0.15 * vague_words_found
         
-        # Factor 3: Palabras de acción específica (BONUS)
-        specific_actions = sum(1 for action in self.SPECIFIC_ACTION_KEYWORDS if action in task_lower)
-        if specific_actions > 0:
-            clarity += 0.2 * min(specific_actions, 1)  # Hasta +0.2
-        
-        # Factor 4: Longitud (ajustado)
+        # Factor 3: Longitud (muy corto = vago)
         word_count = len(task.split())
-        if word_count < 3:
-            clarity -= 0.5  # Muy corto
-        elif word_count < 5:
-            # Solo penaliza si NO tiene acción específica
-            if specific_actions == 0:
-                clarity -= 0.3
+        if word_count < 5:
+            clarity -= 0.3
+        elif word_count < 3:
+            clarity -= 0.5
         
-        # Factor 5: No menciona recursos específicos
-        # (nombres propios, frameworks, estándares)
-        has_specifics = (
-            any(char.isupper() for char in task) or  # Nombres propios
-            any(word in task_lower for word in ['iso', 'soc', 'nist', 'gdpr', 'pci'])  # Estándares
-        )
-        if not has_specifics:
+        # Factor 4: No menciona recursos específicos
+        if not any(char.isupper() for char in task):  # Sin nombres propios/específicos
             clarity -= 0.2
-        
-        # Factor 6: Falta de verbo de acción clara
-        action_verbs = ['genera', 'crea', 'actualiza', 'configura', 'instala', 
-                       'modifica', 'elimina', 'revisa', 'analiza', 'escanea',
-                       'generate', 'create', 'update', 'configure', 'install']
-        has_action_verb = any(verb in task_lower for verb in action_verbs)
-        if not has_action_verb and '?' not in task:
-            clarity -= 0.15  # No es pregunta pero tampoco tiene verbo claro
         
         return max(clarity, 0.0)
     
@@ -227,46 +184,24 @@ Factores analizados:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-# Test completo
+# Test rápido
 if __name__ == "__main__":
     selector = ModeSelector()
     
     test_cases = [
-        ("Ayúdame con SOC 2", {}, "PASSIVE"),
-        ("¿Cómo preparo mi startup para compliance?", {}, "PASSIVE"),
-        ("Necesito ayuda con ISO 27001", {}, "PASSIVE"),
-        ("Genera una política de contraseñas según ISO 27001", {}, "DIRECT"),
-        ("Crea política de respuesta a incidentes", {}, "DIRECT"),
-        ("Delete all users from database", {}, "SAFE"),
-        ("Deshabilita MFA para admin", {}, "SAFE"),
-        ("Actualiza configuración", {'environment': 'production'}, "SAFE"),
+        ("Ayúdame con SOC 2", {}),
+        ("Genera política de contraseñas para ISO 27001", {}),
+        ("Delete all users from database", {}),
+        ("Actualiza configuración", {'environment': 'production'}),
+        ("¿Cómo configuro mi firewall?", {})
     ]
     
-    print("🧪 TESTING MODE SELECTOR (VERSION CORREGIDA)\n")
-    print("="*70)
+    print("🧪 TESTING MODE SELECTOR\n")
     
-    passed = 0
-    failed = 0
-    
-    for task, context, expected in test_cases:
+    for task, context in test_cases:
         mode = selector.select_mode(task, context)
-        status = "✅ PASS" if mode == expected else "❌ FAIL"
-        
-        if mode == expected:
-            passed += 1
-        else:
-            failed += 1
-        
-        print(f"\n{status}")
         print(f"Input: \"{task}\"")
         print(f"Context: {context}")
-        print(f"Esperado: {expected} | Obtenido: {mode}")
+        print(f"→ Modo: {mode}")
         print(selector.explain_last_decision())
-    
-    print("\n" + "="*70)
-    print(f"RESULTADO: {passed}/{len(test_cases)} tests pasaron")
-    
-    if failed == 0:
-        print("✅ TODOS LOS TESTS PASARON!")
-    else:
-        print(f"❌ {failed} tests fallaron")
+        print("\n")
